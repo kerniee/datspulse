@@ -1,0 +1,7 @@
+uv.lock
+.env
+.gitignore
+.vscode
+.venv
+.python-version
+ai_ignore/

@@ -1,0 +1,74 @@
+{
+    "ants": [
+      {
+        "food": {
+          "amount": 0,
+          "type": 0
+        },
+        "health": 100,
+        "id": "11111111-2222-3333-4444-555555555555",
+        "lastAttack": {
+          "q": 10,
+          "r": 20
+        },
+        "lastEnemyAnt": "string",
+        "lastMove": [
+          {
+            "q": 10,
+            "r": 20
+          }
+        ],
+        "move": [
+          {
+            "q": 10,
+            "r": 20
+          }
+        ],
+        "q": 10,
+        "r": 20,
+        "type": 0
+      }
+    ],
+    "enemies": [
+      {
+        "attack": 0,
+        "food": {
+          "amount": 0,
+          "type": 0
+        },
+        "health": 0,
+        "q": 10,
+        "r": 20,
+        "type": 1
+      }
+    ],
+    "food": [
+      {
+        "amount": 0,
+        "q": 10,
+        "r": 20,
+        "type": 0
+      }
+    ],
+    "home": [
+      {
+        "q": 10,
+        "r": 20
+      }
+    ],
+    "map": [
+      {
+        "cost": 1,
+        "q": 10,
+        "r": 20,
+        "type": 0
+      }
+    ],
+    "nextTurnIn": 0,
+    "score": 0,
+    "spot": {
+      "q": 10,
+      "r": 20
+    },
+    "turnNo": 0
+  }

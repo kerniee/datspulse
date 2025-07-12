@@ -1,0 +1,28 @@
+[project]
+name = "datspulse"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dacite>=1.9.2",
+    "matplotlib>=3.10.3",
+    "pygame>=2.6.1",
+    "pytest>=8.4.1",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+
+# dependencies = [
+#     "numba>=0.61.2",
+#     "ortools>=9.14.6206",
+#     ,
+#     "scipy>=1.16.0",
+# ]
+
+# ruff options to autoformat
+[tool.ruff]
+extend-select = ["I"]
