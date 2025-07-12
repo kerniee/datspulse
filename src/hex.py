@@ -1,6 +1,7 @@
 # odd-r layout
 
 from functools import lru_cache
+
 from game_types import Hex
 
 

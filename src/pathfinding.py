@@ -15,6 +15,8 @@ def tile_cost(tile: Tile) -> int:
         return 1
     elif t == HexType.DIRT:
         return 2
+    elif t == HexType.ACID:
+        return 3
     else:  # STONE or ACID
         return VERY_LARGE_INT  # Use a large int for impassible
 
@@ -93,7 +95,7 @@ def find_min_cost_path_to_any(
     found_paths = {}
     valid_targets = targets - taken_destinations
     checked_paths = 0
-    MAX_PATHS_TO_CHECK = 10
+    MAX_PATHS_TO_CHECK = 30
     while queue and checked_paths < MAX_PATHS_TO_CHECK:
         cost_so_far, _, path = heapq.heappop(queue)
         current = path[-1]

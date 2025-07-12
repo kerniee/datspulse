@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
-from this import d
 
 
 # --- Unit Types ---

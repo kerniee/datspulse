@@ -8,9 +8,6 @@ from dotenv import load_dotenv
 
 from ai import AI
 from client import DatsClient
-
-# import matplotlib.pyplot as plt
-# from visualize_player_response import plot_player_response
 from visualize_player_response_pygame import Visualizer
 
 

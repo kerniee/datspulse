@@ -14,6 +14,7 @@ from game_types import (
     PlayerEnemy,
     PlayerMoveCommands,
     PlayerResponse,
+    Tile,
     UnitType,
 )
 from hex import distance, neighbors
@@ -33,10 +34,11 @@ class AIMemory:
         current_food_hexes = {
             Hex(food.q, food.r): food for food in player_response.food
         }
+        map_hexes = set(Hex(tile.q, tile.r) for tile in player_response.map)
         # forget food that is known to be non-existent
         for old_hex, _ in list(self.food.items()):
             # check if we see the food hex
-            if old_hex in player_response.map:
+            if old_hex in map_hexes:
                 # we see the food hex, check if it's still there
                 if old_hex in current_food_hexes:
                     # it's still there, keep it in memory
@@ -60,10 +62,11 @@ class AIMemory:
 
     def update_enemies(self, player_response: PlayerResponse):
         current_enemies = {Hex(e.q, e.r): e for e in player_response.enemies}
+        map_hexes = set(Hex(tile.q, tile.r) for tile in player_response.map)
         # forget enemies that are known to be non-existent
         for old_hex, _ in list(self.enemies.items()):
             # check if we see the enemy hex
-            if old_hex in player_response.map:
+            if old_hex in map_hexes:
                 # we see the enemy hex, check if it's still there
                 if old_hex in current_enemies:
                     # it's still there, keep it in memory
@@ -94,11 +97,38 @@ class AI:
         self._scout_bfs_cache = {}  # (ant_pos, unexplored_key) -> path
         self._scout_bfs_cache_tiles_count = 0
         self.memory = AIMemory()
+        self.same_place_counter: dict[Hex, tuple[str, int]] = {}
 
     # Pathfinding logic moved to pathfinding.py
     # def _bfs_to_nearest_unexplored ...
     # def _find_min_cost_path ...
     # def _find_min_cost_path_to_any ...
+
+    def _update_same_place_counter(self, ants: list[Ant]):
+        for ant in ants:
+            ant_pos = Hex(ant.q, ant.r)
+            if (
+                ant_pos in self.same_place_counter
+                and self.same_place_counter[ant_pos][0] == ant.id
+            ):
+                self.same_place_counter[ant_pos] = (
+                    ant.id,
+                    self.same_place_counter[ant_pos][1] + 1,
+                )
+            else:
+                self.same_place_counter[ant_pos] = (ant.id, 1)
+
+    def unstuck_same_place(
+        self, ant: Ant, player_response: PlayerResponse
+    ) -> Optional[AntMoveCommand]:
+        ant_pos = Hex(ant.q, ant.r)
+        if (
+            ant_pos in self.same_place_counter
+            and self.same_place_counter[ant_pos][0] == ant.id
+            and self.same_place_counter[ant_pos][1] > 5
+        ):
+            return self.unstuck(ant, player_response)
+        return None
 
     def _pick_valid_neighbor(
         self,
@@ -106,6 +136,7 @@ class AI:
         exclude: Optional[set[Hex]] = None,
         not_on_food: Optional[set[Hex]] = None,
         not_stone: bool = False,
+        not_on_hive: Optional[set[Hex]] = None,
     ) -> Optional[Hex]:
         """Pick a valid neighbor for fallback movement, with optional filters."""
         neighbors_list = list(neighbors(ant_pos))
@@ -114,6 +145,8 @@ class AI:
             if exclude and neighbor in exclude:
                 continue
             if not_on_food and neighbor in not_on_food:
+                continue
+            if not_on_hive and neighbor in not_on_hive:
                 continue
             if not_stone:
                 tile = self.seen_tiles.get(neighbor)
@@ -157,6 +190,33 @@ class AI:
         food_hexes = set(Hex(food.q, food.r) for food in player_response.food)
         memory_food_hexes = self.memory.get_food_hexes()
         all_food_hexes = food_hexes | memory_food_hexes
+
+        # --- Filter NECTAR on enemy hives for WORKER ants ---
+        if ant.type == UnitType.WORKER:
+            # Identify all anthill tiles
+            home_hexes = set(player_response.home)
+            anthill_hexes = set(
+                Hex(tile.q, tile.r)
+                for tile in player_response.map
+                if tile.type == HexType.ANTHILL
+            )
+            enemy_hive_hexes = anthill_hexes - home_hexes
+            # Build a set of food hexes that are NECTAR on enemy hives
+            nectar_on_enemy_hive = set(
+                Hex(food.q, food.r)
+                for food in player_response.food
+                if food.type == 3
+                and Hex(food.q, food.r) in enemy_hive_hexes  # 3 == FoodType.NECTAR
+            )
+            # Also filter from memory
+            nectar_on_enemy_hive |= set(
+                hex_
+                for hex_ in memory_food_hexes
+                if ((self.memory.food[hex_].type == 3) and (hex_ in enemy_hive_hexes))
+            )
+            all_food_hexes = all_food_hexes - nectar_on_enemy_hive
+        # --- End filter ---
+
         # Exclude food hexes already taken by other ants
         available_food_hexes = all_food_hexes - self.taken_destinations
         if not available_food_hexes:
@@ -174,7 +234,7 @@ class AI:
         seen_hexes = set(self.seen_tiles.keys())
         known_hexes = set(Hex(tile.q, tile.r) for tile in player_response.map)
         unexplored = seen_hexes - known_hexes
-        food_hexes = set(Hex(food.q, food.r) for food in player_response.food)
+        food_hexes = set(Hex(food.q, food.r) for food in self.memory.get_food_hexes())
         unexplored = unexplored - food_hexes
         DANGER_RADIUS = 4
         ant_pos = Hex(ant.q, ant.r)
@@ -289,11 +349,34 @@ class AI:
 
     def unstuck(self, ant: Ant, player_response: PlayerResponse) -> AntMoveCommand:
         ant_pos = Hex(ant.q, ant.r)
-        fallback = self._pick_valid_neighbor(ant_pos, exclude=self.taken_destinations)
+        # Build set of hive (anthill) tiles
+        hive_hexes = set(
+            Hex(tile.q, tile.r)
+            for tile in self.seen_tiles.values()
+            if tile.type == HexType.ANTHILL
+        )
+        fallback = self._pick_valid_neighbor(
+            ant_pos, exclude=self.taken_destinations, not_on_hive=hive_hexes
+        )
         if fallback:
             self.taken_destinations.add(fallback)
             return AntMoveCommand(ant=ant.id, path=[fallback])
         print(f"Ant {ant} is stuck")
+        # As a last resort, pick any neighbor not on hive
+        neighbors_list = [n for n in neighbors(ant_pos) if n not in hive_hexes]
+        # remove stone and acid from neighbors list
+        neighbors_list = [
+            n
+            for n in neighbors_list
+            if n not in self.taken_destinations
+            and self.seen_tiles.get(n, Tile(cost=0, q=0, r=0, type=HexType.EMPTY)).type
+            != HexType.STONE
+            and self.seen_tiles.get(n, Tile(cost=0, q=0, r=0, type=HexType.EMPTY)).type
+            != HexType.ACID
+        ]
+        if neighbors_list:
+            return AntMoveCommand(ant=ant.id, path=[choice(neighbors_list)])
+        # If all neighbors are hives (very rare), just pick any
         neighbors_list = list(neighbors(ant_pos))
         return AntMoveCommand(ant=ant.id, path=[choice(neighbors_list)])
 
@@ -304,15 +387,55 @@ class AI:
         )
 
         self.taken_destinations = set()
-        for tile in player_response.map:
-            if tile.type == HexType.STONE or tile.type == HexType.ACID:
-                self.taken_destinations.add(Hex(tile.q, tile.r))
+
+        # add main hive to taken destinations if we have less than 100 ants
+        if len(player_response.ants) < 100:
+            self.taken_destinations.add(
+                Hex(player_response.spot.q, player_response.spot.r)
+            )
+
+        # add stones and acid to taken destinations
+        for tile in self.seen_tiles.values():
+            if player_response.turnNo > 200:
+                if tile.type == HexType.STONE:
+                    self.taken_destinations.add(Hex(tile.q, tile.r))
+            else:
+                if tile.type == HexType.STONE or tile.type == HexType.ACID:
+                    self.taken_destinations.add(Hex(tile.q, tile.r))
+
+        # add enemies to taken destinations
+        enemy_hexes = set(Hex(e.q, e.r) for e in player_response.enemies)
+        self.taken_destinations |= enemy_hexes
+
+        if len(player_response.ants) < 70:
+            print("Adding fighter enemies neighbor tiles to taken destinations")
+            # add fighter enemies neighbor tiles to taken destinations
+            warrior_enemies = [
+                e for e in player_response.enemies if e.type == UnitType.FIGHTER
+            ]
+            for enemy in warrior_enemies:
+                for neighbor in neighbors(Hex(enemy.q, enemy.r)):
+                    self.taken_destinations.add(neighbor)
+
+        # add food near enemies to taken destinations
+        FOOD_NEAR_ENEMY_RADIUS = 3
+        food_hexes = self.memory.get_food_hexes()
+        for food_hex in food_hexes:
+            counter = 0
+            for enemy_hex in enemy_hexes:
+                if distance(food_hex, enemy_hex) <= FOOD_NEAR_ENEMY_RADIUS:
+                    counter += 1
+            if counter > 2:
+                print(f"Food near enemy: {food_hex}, counter: {counter}")
+                self.taken_destinations.add(food_hex)
 
         self.memory.update_enemies(player_response)
         self.memory.update_food(player_response)
 
+        self._update_same_place_counter(player_response.ants)
         moves: list[AntMoveCommand] = []
         already_moved_ants = set()
+
         for ant in player_response.ants:
             if ant.food.amount > 0:
                 move = self.timeit(
@@ -321,9 +444,18 @@ class AI:
                     ant,
                     player_response,
                 )
+                already_moved_ants.add(ant.id)
                 if move.path:
-                    already_moved_ants.add(ant.id)
                     moves.append(move)
+                else:
+                    moves.append(self.unstuck(ant, player_response))
+
+        for ant in player_response.ants:
+            move = self.unstuck_same_place(ant, player_response)
+            if move:
+                moves.append(move)
+                already_moved_ants.add(ant.id)
+
         for ant in player_response.ants:
             move = None
             if ant.id in already_moved_ants:
